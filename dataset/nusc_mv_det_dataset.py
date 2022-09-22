@@ -519,16 +519,16 @@ class NuscMVDetDataset(Dataset):
             info = self.infos[cur_idx]
             cam_infos.append(info['cam_infos'])
             for sweep_idx in self.sweeps_idx:
-                if len(info['sweeps']) == 0:
+                if len(info['cam_sweeps']) == 0:
                     cam_infos.append(info['cam_infos'])
                 else:
                     # Handle scenarios when current sweep doesn't have all
                     # cam keys.
-                    for i in range(min(len(info['sweeps']) - 1, sweep_idx), -1,
-                                   -1):
-                        if sum([cam in info['sweeps'][i]
+                    for i in range(min(len(info['cam_sweeps']) - 1, sweep_idx),
+                                   -1, -1):
+                        if sum([cam in info['cam_sweeps'][i]
                                 for cam in cams]) == len(cams):
-                            cam_infos.append(info['sweeps'][i])
+                            cam_infos.append(info['cam_sweeps'][i])
                             break
         image_data_list = self.get_image(cam_infos, cams)
         ret_list = list()
