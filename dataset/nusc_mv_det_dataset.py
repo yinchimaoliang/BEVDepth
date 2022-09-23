@@ -4,7 +4,8 @@ import mmcv
 import numpy as np
 import torch
 from mmdet3d.core.bbox.structures.lidar_box3d import LiDARInstance3DBoxes
-from nuscenes.utils.data_classes import Box
+from nuscenes.utils.data_classes import Box, LidarPointCloud
+from nuscenes.utils.geometry_utils import view_points
 from PIL import Image
 from pyquaternion import Quaternion
 from torch.utils.data import Dataset
@@ -287,12 +288,12 @@ class NuscMVDetDataset(Dataset):
             flip_dy = False
         return rotate_bda, scale_bda, flip_dx, flip_dy
 
-    def get_image(self, cam_infos, cams):
+    def get_image(self, cam_infos, cam_names, lidar_infos=None):
         """Given data and cam_names, return image data needed.
 
         Args:
             sweeps_data (list): Raw data used to generate the data we needed.
-            cams (list): Camera names.
+            cam_names (list): Camera names.
 
         Returns:
             Tensor: Image data after processing.
@@ -312,7 +313,28 @@ class NuscMVDetDataset(Dataset):
         sweep_sensor2sensor_mats = list()
         sweep_timestamps = list()
         gt_depth = list()
-        for cam in cams:
+        all_sensor_points = list()
+        # TODO: Support sensor sampling.
+        for lidar_val in lidar_infos.values():
+            lidar_path = os.path.join(self.data_root, lidar_val['filename'])
+            single_sensor_points = np.fromfile(lidar_path,
+                                               dtype=np.float32,
+                                               count=-1).reshape(-1,
+                                                                 5)[..., :4]
+            lidar_calibrated_sensor = lidar_val['calibrated_sensor']
+            lidar_ego_pose = lidar_val['ego_pose']
+            pc = LidarPointCloud(single_sensor_points.T)
+            pc.rotate(
+                Quaternion(
+                    lidar_calibrated_sensor['rotation']).rotation_matrix)
+            pc.translate(np.array(lidar_calibrated_sensor['translation']))
+
+            # Second step: transform from ego to the global frame.
+            pc.rotate(Quaternion(lidar_ego_pose['rotation']).rotation_matrix)
+            pc.translate(np.array(lidar_ego_pose['translation']))
+            all_sensor_points.append(pc.points)
+        all_sensor_points = np.concatenate(all_sensor_points, 1)
+        for cam_name in cam_names:
             imgs = list()
             sensor2ego_mats = list()
             intrin_mats = list()
@@ -323,39 +345,41 @@ class NuscMVDetDataset(Dataset):
             resize, resize_dims, crop, flip, \
                 rotate_ida = self.sample_ida_augmentation(
                     )
-            for sweep_idx, cam_info in enumerate(cam_infos):
+            for frame_idx, cam_info in enumerate(cam_infos):
 
                 img = Image.open(
-                    os.path.join(self.data_root, cam_info[cam]['filename']))
+                    os.path.join(self.data_root,
+                                 cam_info[cam_name]['filename']))
                 # img = Image.fromarray(img)
-                w, x, y, z = cam_info[cam]['calibrated_sensor']['rotation']
+                w, x, y, z = cam_info[cam_name]['calibrated_sensor'][
+                    'rotation']
                 # sweep sensor to sweep ego
                 sweepsensor2sweepego_rot = torch.Tensor(
                     Quaternion(w, x, y, z).rotation_matrix)
                 sweepsensor2sweepego_tran = torch.Tensor(
-                    cam_info[cam]['calibrated_sensor']['translation'])
+                    cam_info[cam_name]['calibrated_sensor']['translation'])
                 sweepsensor2sweepego = sweepsensor2sweepego_rot.new_zeros(
                     (4, 4))
                 sweepsensor2sweepego[3, 3] = 1
                 sweepsensor2sweepego[:3, :3] = sweepsensor2sweepego_rot
                 sweepsensor2sweepego[:3, -1] = sweepsensor2sweepego_tran
                 # sweep ego to global
-                w, x, y, z = cam_info[cam]['ego_pose']['rotation']
+                w, x, y, z = cam_info[cam_name]['ego_pose']['rotation']
                 sweepego2global_rot = torch.Tensor(
                     Quaternion(w, x, y, z).rotation_matrix)
                 sweepego2global_tran = torch.Tensor(
-                    cam_info[cam]['ego_pose']['translation'])
+                    cam_info[cam_name]['ego_pose']['translation'])
                 sweepego2global = sweepego2global_rot.new_zeros((4, 4))
                 sweepego2global[3, 3] = 1
                 sweepego2global[:3, :3] = sweepego2global_rot
                 sweepego2global[:3, -1] = sweepego2global_tran
 
                 # global sensor to cur ego
-                w, x, y, z = key_info[cam]['ego_pose']['rotation']
+                w, x, y, z = key_info[cam_name]['ego_pose']['rotation']
                 keyego2global_rot = torch.Tensor(
                     Quaternion(w, x, y, z).rotation_matrix)
                 keyego2global_tran = torch.Tensor(
-                    key_info[cam]['ego_pose']['translation'])
+                    key_info[cam_name]['ego_pose']['translation'])
                 keyego2global = keyego2global_rot.new_zeros((4, 4))
                 keyego2global[3, 3] = 1
                 keyego2global[:3, :3] = keyego2global_rot
@@ -363,11 +387,12 @@ class NuscMVDetDataset(Dataset):
                 global2keyego = keyego2global.inverse()
 
                 # cur ego to sensor
-                w, x, y, z = key_info[cam]['calibrated_sensor']['rotation']
+                w, x, y, z = key_info[cam_name]['calibrated_sensor'][
+                    'rotation']
                 keysensor2keyego_rot = torch.Tensor(
                     Quaternion(w, x, y, z).rotation_matrix)
                 keysensor2keyego_tran = torch.Tensor(
-                    key_info[cam]['calibrated_sensor']['translation'])
+                    key_info[cam_name]['calibrated_sensor']['translation'])
                 keysensor2keyego = keysensor2keyego_rot.new_zeros((4, 4))
                 keysensor2keyego[3, 3] = 1
                 keysensor2keyego[:3, :3] = keysensor2keyego_rot
@@ -383,13 +408,18 @@ class NuscMVDetDataset(Dataset):
                 intrin_mat = torch.zeros((4, 4))
                 intrin_mat[3, 3] = 1
                 intrin_mat[:3, :3] = torch.Tensor(
-                    cam_info[cam]['calibrated_sensor']['camera_intrinsic'])
-                if self.return_depth and sweep_idx == 0:
-                    file_name = os.path.split(cam_info[cam]['filename'])[-1]
-                    point_depth = np.fromfile(os.path.join(
-                        self.data_root, 'depth_gt', f'{file_name}.bin'),
-                                              dtype=np.float32,
-                                              count=-1).reshape(-1, 3)
+                    cam_info[cam_name]['calibrated_sensor']
+                    ['camera_intrinsic'])
+                if self.return_depth and frame_idx == 0:
+                    cam_calibrated_sensor = cam_info[cam_name][
+                        'calibrated_sensor']
+                    cam_ego_pose = cam_info[cam_name]['ego_pose']
+                    pts_img, depth = self.map_pointcloud_to_image(
+                        all_sensor_points.copy(), img.size,
+                        cam_calibrated_sensor, cam_ego_pose)
+                    point_depth = np.concatenate(
+                        [pts_img[:2, :].T, depth[:, None]],
+                        axis=1).astype(np.float32)
                     point_depth_augmented = depth_transform(
                         point_depth, resize, self.ida_aug_conf['final_dim'],
                         crop, flip, rotate_ida)
@@ -408,7 +438,7 @@ class NuscMVDetDataset(Dataset):
                 img = torch.from_numpy(img).permute(2, 0, 1)
                 imgs.append(img)
                 intrin_mats.append(intrin_mat)
-                timestamps.append(cam_info[cam]['timestamp'])
+                timestamps.append(cam_info[cam_name]['timestamp'])
             sweep_imgs.append(torch.stack(imgs))
             sweep_sensor2ego_mats.append(torch.stack(sensor2ego_mats))
             sweep_intrin_mats.append(torch.stack(intrin_mats))
@@ -417,9 +447,9 @@ class NuscMVDetDataset(Dataset):
             sweep_timestamps.append(torch.tensor(timestamps))
         # Get mean pose of all cams.
         ego2global_rotation = np.mean(
-            [key_info[cam]['ego_pose']['rotation'] for cam in cams], 0)
+            [key_info[cam]['ego_pose']['rotation'] for cam in cam_names], 0)
         ego2global_translation = np.mean(
-            [key_info[cam]['ego_pose']['translation'] for cam in cams], 0)
+            [key_info[cam]['ego_pose']['translation'] for cam in cam_names], 0)
         img_metas = dict(
             box_type_3d=LiDARInstance3DBoxes,
             ego2global_translation=ego2global_translation,
@@ -438,6 +468,59 @@ class NuscMVDetDataset(Dataset):
         if self.return_depth:
             ret_list.append(torch.stack(gt_depth))
         return ret_list
+
+    def map_pointcloud_to_image(
+        self,
+        point_cloud,
+        img_size,
+        cam_calibrated_sensor,
+        cam_ego_pose,
+        min_dist: float = 0.0,
+    ):
+
+        # Points live in the point sensor frame. So they need to be
+        # transformed via global to the image plane.
+
+        point_cloud = LidarPointCloud(point_cloud)
+
+        # transform from global into the ego vehicle
+        # frame for the timestamp of the image.
+        point_cloud.translate(-np.array(cam_ego_pose['translation']))
+        point_cloud.rotate(
+            Quaternion(cam_ego_pose['rotation']).rotation_matrix.T)
+
+        # transform from ego into the camera.
+        point_cloud.translate(-np.array(cam_calibrated_sensor['translation']))
+        point_cloud.rotate(
+            Quaternion(cam_calibrated_sensor['rotation']).rotation_matrix.T)
+
+        # actually take a "picture" of the point cloud.
+        # Grab the depths (camera frame z axis points away from the camera).
+        depths = point_cloud.points[2, :]
+        coloring = depths
+
+        # Take the actual picture (matrix multiplication with camera-matrix
+        # + renormalization).
+        points = view_points(point_cloud.points[:3, :],
+                             np.array(
+                                 cam_calibrated_sensor['camera_intrinsic']),
+                             normalize=True)
+
+        # Remove points that are either outside or behind the camera.
+        # Leave a margin of 1 pixel for aesthetic reasons. Also make
+        # sure points are at least 1m in front of the camera to avoid
+        # seeing the lidar points on the camera casing for non-keyframes
+        # which are slightly out of sync.
+        mask = np.ones(depths.shape[0], dtype=bool)
+        mask = np.logical_and(mask, depths > min_dist)
+        mask = np.logical_and(mask, points[0, :] > 1)
+        mask = np.logical_and(mask, points[0, :] < img_size[0] - 1)
+        mask = np.logical_and(mask, points[1, :] > 1)
+        mask = np.logical_and(mask, points[1, :] < img_size[1] - 1)
+        points = points[:, mask]
+        coloring = coloring[mask]
+
+        return points, coloring
 
     def get_gt(self, info, cams):
         """Generate gt labels from info.
@@ -484,6 +567,7 @@ class NuscMVDetDataset(Dataset):
             gt_labels.append(
                 self.classes.index(map_name_from_general_to_detection[
                     ann_info['category_name']]))
+
         return torch.Tensor(gt_boxes), torch.tensor(gt_labels)
 
     def choose_cams(self):
@@ -504,6 +588,7 @@ class NuscMVDetDataset(Dataset):
     def __getitem__(self, idx):
         if self.use_cbgs:
             idx = self.sample_indices[idx]
+        # idx = 0
         cam_infos = list()
         # TODO: Check if it still works when number of cameras is reduced.
         cams = self.choose_cams()
@@ -519,18 +604,18 @@ class NuscMVDetDataset(Dataset):
             info = self.infos[cur_idx]
             cam_infos.append(info['cam_infos'])
             for sweep_idx in self.sweeps_idx:
-                if len(info['sweeps']) == 0:
+                if len(info['cam_sweeps']) == 0:
                     cam_infos.append(info['cam_infos'])
                 else:
                     # Handle scenarios when current sweep doesn't have all
                     # cam keys.
-                    for i in range(min(len(info['sweeps']) - 1, sweep_idx), -1,
-                                   -1):
-                        if sum([cam in info['sweeps'][i]
+                    for i in range(min(len(info['cam_sweeps']) - 1, sweep_idx),
+                                   -1, -1):
+                        if sum([cam in info['cam_sweeps'][i]
                                 for cam in cams]) == len(cams):
-                            cam_infos.append(info['sweeps'][i])
+                            cam_infos.append(info['cam_sweeps'][i])
                             break
-        image_data_list = self.get_image(cam_infos, cams)
+        image_data_list = self.get_image(cam_infos, cams, info['lidar_infos'])
         ret_list = list()
         (
             sweep_imgs,
