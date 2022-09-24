@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 import torch
 
-from datasets.nusc_mv_det_dataset import NuscMVDetDataset
+from datasets.nusc_fusion_det_dataset import NuscFusionDetDataset
 
 CLASSES = [
     'car',
@@ -51,17 +51,18 @@ bda_aug_conf = {
 }
 
 
-class TestNuscMVDetData(unittest.TestCase):
-    def test_nusc_mv_dataset(self):
+class TestNuscFusionDetData(unittest.TestCase):
+    def test_nusc_fusion_dataset(self):
         np.random.seed(0)
         torch.random.manual_seed(0)
-        nusc = NuscMVDetDataset(ida_aug_conf,
-                                bda_aug_conf,
-                                CLASSES,
-                                './test/data/nuscenes',
-                                './test/data/nuscenes/infos.pkl',
-                                True,
-                                sweep_idxes=[4])
+        nusc = NuscFusionDetDataset(ida_aug_conf,
+                                    bda_aug_conf,
+                                    CLASSES,
+                                    './test/data/nuscenes',
+                                    './test/data/nuscenes/infos.pkl',
+                                    True,
+                                    sweep_idxes=[4],
+                                    return_depth=True)
         ret_list = nusc[0]
         assert torch.isclose(ret_list[0].mean(),
                              torch.tensor(-0.4667),
