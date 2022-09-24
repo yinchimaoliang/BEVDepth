@@ -26,15 +26,15 @@ from argparse import ArgumentParser, Namespace
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
+from exps.bev_depth_lss_r50_256x704_128x128_24e_2key import \
+    BEVDepthLightningModel as BaseBEVDepthLightningModel
 from torch.cuda.amp.autocast_mode import autocast
 from torch.optim.lr_scheduler import MultiStepLR
 
 from callbacks.ema import EMACallback
-from exps.bev_depth_lss_r50_256x704_128x128_24e_2key import \
-    BEVDepthLightningModel as BaseBEVDepthLightningModel
-from layers.backbones.lss_fpn import LSSFPN as BaseLSSFPN
+from layers.backbones.base_lss_fpn import BaseLSSFPN as BaseLSSFPN
 from layers.heads.bev_depth_head import BEVDepthHead
-from models.bev_depth import BEVDepth as BaseBEVDepth
+from models.base_bev_depth import BaseBEVDepth as BaseBEVDepth
 
 
 class DepthAggregation(nn.Module):

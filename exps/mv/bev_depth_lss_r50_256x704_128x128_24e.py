@@ -15,7 +15,7 @@ from torch.optim.lr_scheduler import MultiStepLR
 
 from datasets.nusc_mv_det_dataset import NuscMVDetDataset, collate_fn
 from evaluators.det_mv_evaluators import DetMVNuscEvaluator
-from models.bev_depth import BEVDepth
+from models.base_bev_depth import BaseBEVDepth
 from utils.torch_dist import all_gather_object, get_rank, synchronize
 
 H = 900
@@ -213,9 +213,9 @@ class BEVDepthLightningModel(LightningModule):
         self.default_root_dir = default_root_dir
         self.evaluator = DetMVNuscEvaluator(class_names=self.class_names,
                                             output_dir=self.default_root_dir)
-        self.model = BEVDepth(self.backbone_conf,
-                              self.head_conf,
-                              is_train_depth=True)
+        self.model = BaseBEVDepth(self.backbone_conf,
+                                  self.head_conf,
+                                  is_train_depth=True)
         self.mode = 'valid'
         self.img_conf = img_conf
         self.data_use_cbgs = False
@@ -378,7 +378,7 @@ class BEVDepthLightningModel(LightningModule):
             bda_aug_conf=self.bda_aug_conf,
             classes=self.class_names,
             data_root=self.data_root,
-            info_path='data/nuScenes/nuscenes_infos_train.pkl',
+            info_path='data/nuScenes/nuscenes_12hz_infos_train.pkl',
             is_train=True,
             use_cbgs=self.data_use_cbgs,
             img_conf=self.img_conf,
@@ -407,7 +407,7 @@ class BEVDepthLightningModel(LightningModule):
             bda_aug_conf=self.bda_aug_conf,
             classes=self.class_names,
             data_root=self.data_root,
-            info_path='data/nuScenes/nuscenes_infos_val.pkl',
+            info_path='data/nuScenes/nuscenes_12hz_infos_val.pkl',
             is_train=False,
             img_conf=self.img_conf,
             num_sweeps=self.num_sweeps,

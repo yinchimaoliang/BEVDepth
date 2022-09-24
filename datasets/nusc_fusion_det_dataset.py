@@ -33,26 +33,25 @@ class NuscFusionDetDataset(NuscMVDetDataset):
             dict: meta infos needed for evaluation.
         """
         assert len(cam_infos) > 0
-        num_cams = len(cam_names)
         sweep_imgs = list()
         sweep_sensor2ego_mats = list()
         sweep_intrin_mats = list()
         sweep_ida_mats = list()
         sweep_sensor2sensor_mats = list()
-        sweep_depth_gts = [list() for _ in range(num_cams)]
+        sweep_depth_gts = list()
         cam_sweep_timestamps = list()
         lidar_timestamps = [
             lidar_info['LIDAR_TOP']['timestamp'] for lidar_info in lidar_infos
         ]
-        all_sensor_points = list()
         lidar_memo = dict()
-        for cam_idx, cam_name in enumerate(cam_names):
+        for cam_name in cam_names:
             imgs = list()
             sensor2ego_mats = list()
             intrin_mats = list()
             ida_mats = list()
             sensor2sensor_mats = list()
             timestamps = list()
+            depth_gts = list()
             key_info = cam_infos[0]
             resize, resize_dims, crop, flip, \
                 rotate_ida = self.sample_ida_augmentation(
@@ -65,6 +64,7 @@ class NuscFusionDetDataset(NuscMVDetDataset):
                 if lidar_idx in lidar_memo:
                     all_sensor_points = lidar_memo[lidar_idx]
                 else:
+                    all_sensor_points = list()
                     for lidar_val in lidar_infos[lidar_idx].values():
                         lidar_path = os.path.join(self.data_root,
                                                   lidar_val['filename'])
@@ -166,7 +166,7 @@ class NuscFusionDetDataset(NuscMVDetDataset):
                     point_depth_augmented = depth_transform(
                         point_depth, resize, self.ida_aug_conf['final_dim'],
                         crop, flip, rotate_ida)
-                    sweep_depth_gts[cam_idx].append(point_depth_augmented)
+                    depth_gts.append(point_depth_augmented)
                 img, ida_mat = img_transform(
                     img,
                     resize=resize,
@@ -188,6 +188,7 @@ class NuscFusionDetDataset(NuscMVDetDataset):
             sweep_ida_mats.append(torch.stack(ida_mats))
             sweep_sensor2sensor_mats.append(torch.stack(sensor2sensor_mats))
             cam_sweep_timestamps.append(torch.tensor(timestamps))
+            sweep_depth_gts.append(torch.stack(depth_gts))
         # Get mean pose of all cams.
         ego2global_rotation = np.mean(
             [key_info[cam]['ego_pose']['rotation'] for cam in cam_names], 0)
@@ -208,10 +209,8 @@ class NuscFusionDetDataset(NuscMVDetDataset):
             torch.stack(cam_sweep_timestamps).permute(1, 0),
             img_metas,
         ]
-        for i in range(num_cams):
-            sweep_depth_gts[i] = torch.stack(sweep_depth_gts[i])
         if self.return_depth:
-            ret_list.append(torch.stack(sweep_depth_gts))
+            ret_list.append(torch.stack(sweep_depth_gts).permute(1, 0, 2, 3))
         return ret_list
 
     def __getitem__(self, idx):
