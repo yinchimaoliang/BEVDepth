@@ -57,7 +57,7 @@ class FusionLSSFPN(BaseLSSFPN):
             lidar_depth_one_hot = self.get_downsampled_lidar_depth(
                 lidar_depth.squeeze(1))
             fg_mask = torch.max(lidar_depth_one_hot, dim=-1).values > 0.0
-            depth[fg_mask] *= lidar_depth_one_hot[fg_mask]
+            depth[fg_mask] = lidar_depth_one_hot[fg_mask]
             depth = depth.permute(0, 3, 1, 2)
         else:
             depth = depth_feature[:, :self.depth_channels].softmax(1)

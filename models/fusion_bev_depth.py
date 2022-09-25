@@ -62,6 +62,6 @@ class FusionBEVDepth(BaseBEVDepth):
             preds = self.head(x)
             return preds, depth_pred
         else:
-            x = self.backbone(x, mats_dict, timestamps)
+            x = self.backbone(x, mats_dict, lidar_depth, timestamps)
             preds = self.head(x)
             return preds

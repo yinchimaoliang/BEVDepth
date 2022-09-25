@@ -153,20 +153,18 @@ class NuscFusionDetDataset(NuscMVDetDataset):
                 intrin_mat[:3, :3] = torch.Tensor(
                     cam_info[cam_name]['calibrated_sensor']
                     ['camera_intrinsic'])
-                if self.return_depth:
-                    cam_calibrated_sensor = cam_info[cam_name][
-                        'calibrated_sensor']
-                    cam_ego_pose = cam_info[cam_name]['ego_pose']
-                    pts_img, depth = self.map_pointcloud_to_image(
-                        all_sensor_points.copy(), img.size,
-                        cam_calibrated_sensor, cam_ego_pose)
-                    point_depth = np.concatenate(
-                        [pts_img[:2, :].T, depth[:, None]],
-                        axis=1).astype(np.float32)
-                    point_depth_augmented = depth_transform(
-                        point_depth, resize, self.ida_aug_conf['final_dim'],
-                        crop, flip, rotate_ida)
-                    depth_gts.append(point_depth_augmented)
+                cam_calibrated_sensor = cam_info[cam_name]['calibrated_sensor']
+                cam_ego_pose = cam_info[cam_name]['ego_pose']
+                pts_img, depth = self.map_pointcloud_to_image(
+                    all_sensor_points.copy(), img.size, cam_calibrated_sensor,
+                    cam_ego_pose)
+                point_depth = np.concatenate(
+                    [pts_img[:2, :].T, depth[:, None]],
+                    axis=1).astype(np.float32)
+                point_depth_augmented = depth_transform(
+                    point_depth, resize, self.ida_aug_conf['final_dim'], crop,
+                    flip, rotate_ida)
+                depth_gts.append(point_depth_augmented)
                 img, ida_mat = img_transform(
                     img,
                     resize=resize,
@@ -209,8 +207,7 @@ class NuscFusionDetDataset(NuscMVDetDataset):
             torch.stack(cam_sweep_timestamps).permute(1, 0),
             img_metas,
         ]
-        if self.return_depth:
-            ret_list.append(torch.stack(sweep_depth_gts).permute(1, 0, 2, 3))
+        ret_list.append(torch.stack(sweep_depth_gts).permute(1, 0, 2, 3))
         return ret_list
 
     def __getitem__(self, idx):
@@ -284,8 +281,7 @@ class NuscFusionDetDataset(NuscMVDetDataset):
             gt_boxes,
             gt_labels,
         ]
-        if self.return_depth:
-            ret_list.append(image_data_list[7])
+        ret_list.append(image_data_list[7])
         return ret_list
 
     def __str__(self):

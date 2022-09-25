@@ -1,5 +1,6 @@
 # Copyright (c) Megvii Inc. All rights reserved.
 from argparse import ArgumentParser, Namespace
+from functools import partial
 
 import mmcv
 import pytorch_lightning as pl
@@ -204,7 +205,7 @@ class BEVDepthLightningModel(LightningModule):
         self.eval_interval = eval_interval
         self.batch_size_per_device = batch_size_per_device
         self.data_root = data_root
-        self.basic_lr_per_img = 2e-4 / 64
+        self.basic_lr_per_img = 2e-4 / 8
         self.class_names = class_names
         self.backbone_conf = backbone_conf
         self.head_conf = head_conf
@@ -309,12 +310,12 @@ class BEVDepthLightningModel(LightningModule):
         return gt_depths.float()
 
     def eval_step(self, batch, batch_idx, prefix: str):
-        (sweep_imgs, mats, _, img_metas, _, _) = batch
+        (sweep_imgs, mats, _, img_metas, _, _, lidar_depth) = batch
         if torch.cuda.is_available():
             for key, value in mats.items():
                 mats[key] = value.cuda()
             sweep_imgs = sweep_imgs.cuda()
-        preds = self.model(sweep_imgs, mats)
+        preds = self.model(sweep_imgs, mats, lidar_depth)
         if isinstance(self.model, torch.nn.parallel.DistributedDataParallel):
             results = self.model.module.get_bboxes(preds, img_metas)
         else:
@@ -388,7 +389,6 @@ class BEVDepthLightningModel(LightningModule):
             key_idxes=self.key_idxes,
             return_depth=self.data_return_depth,
         )
-        from functools import partial
 
         train_loader = torch.utils.data.DataLoader(
             train_dataset,
@@ -420,7 +420,7 @@ class BEVDepthLightningModel(LightningModule):
             val_dataset,
             batch_size=self.batch_size_per_device,
             shuffle=False,
-            collate_fn=collate_fn,
+            collate_fn=partial(collate_fn, is_return_depth=True),
             num_workers=4,
             sampler=None,
         )
