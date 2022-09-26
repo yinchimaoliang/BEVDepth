@@ -11,7 +11,6 @@ import torch.utils.data
 import torch.utils.data.distributed
 import torchvision.models as models
 from pytorch_lightning.core import LightningModule
-from torch.cuda.amp.autocast_mode import autocast
 from torch.optim.lr_scheduler import MultiStepLR
 
 from datasets.nusc_fusion_det_dataset import NuscFusionDetDataset
@@ -205,7 +204,7 @@ class BEVDepthLightningModel(LightningModule):
         self.eval_interval = eval_interval
         self.batch_size_per_device = batch_size_per_device
         self.data_root = data_root
-        self.basic_lr_per_img = 2e-4 / 8
+        self.basic_lr_per_img = 2e-4 / 36
         self.class_names = class_names
         self.backbone_conf = backbone_conf
         self.head_conf = head_conf
@@ -254,21 +253,6 @@ class BEVDepthLightningModel(LightningModule):
             lidar_depth = lidar_depth[:, 0, ...]
         self.log('detection_loss', detection_loss)
         return detection_loss
-
-    def get_depth_loss(self, depth_labels, depth_preds):
-        depth_labels = self.get_downsampled_gt_depth(depth_labels)
-        depth_preds = depth_preds.permute(0, 2, 3, 1).contiguous().view(
-            -1, self.depth_channels)
-        fg_mask = torch.max(depth_labels, dim=1).values > 0.0
-
-        with autocast(enabled=False):
-            depth_loss = (F.binary_cross_entropy(
-                depth_preds[fg_mask],
-                depth_labels[fg_mask],
-                reduction='none',
-            ).sum() / max(1.0, fg_mask.sum()))
-
-        return 3.0 * depth_loss
 
     def get_downsampled_gt_depth(self, gt_depths):
         """

@@ -1,6 +1,5 @@
 # Copyright (c) Megvii Inc. All rights reserved.
 import torch
-import torch.nn.functional as F
 from mmdet3d.models import build_neck
 from mmdet.models import build_backbone
 
@@ -120,6 +119,63 @@ class FusionLSSFPN(BaseLSSFPN):
     def _forward_context_net(self, feat, mats_dict):
         return self.context_net(feat, mats_dict)
 
+    def get_geometry(self, depth, sensor2ego_mat, intrin_mat, ida_mat,
+                     bda_mat):
+        """Transfer points from camera coord to ego coord.
+
+        Args:
+            rots(Tensor): Rotation matrix from camera to ego.
+            trans(Tensor): Translation matrix from camera to ego.
+            intrins(Tensor): Intrinsic matrix.
+            post_rots_ida(Tensor): Rotation matrix for ida.
+            post_trans_ida(Tensor): Translation matrix for ida
+            post_rot_bda(Tensor): Rotation matrix for bda.
+
+        Returns:
+            Tensors: points ego coord.
+        """
+        device = depth.device
+        batch_size_with_num_cams = depth.shape[0]
+        ogfH, ogfW = self.final_dim
+        fH, fW = ogfH // self.downsample_factor, ogfW // self.downsample_factor
+        x_coords = torch.linspace(0,
+                                  ogfW - 1,
+                                  fW,
+                                  dtype=torch.float,
+                                  device=device).view(1, 1, 1, fW).expand(
+                                      batch_size_with_num_cams, 1, fH, fW)
+        y_coords = torch.linspace(0,
+                                  ogfH - 1,
+                                  fH,
+                                  dtype=torch.float,
+                                  device=device).view(1, 1, fH, 1).expand(
+                                      batch_size_with_num_cams, 1, fH, fW)
+        paddings = torch.ones_like(depth)
+
+        # D x H x W x 3
+        xyz_coords = torch.stack((x_coords, y_coords, depth, paddings), -1)
+        batch_size, num_cams, _, _ = sensor2ego_mat.shape
+        points = xyz_coords.reshape(batch_size, num_cams,
+                                    *xyz_coords.shape[1:])
+        # undo post-transformation
+        ida_mat = ida_mat.view(batch_size, num_cams, 1, 1, 1, 4, 4)
+        points = ida_mat.inverse().matmul(points.unsqueeze(-1))
+        # cam_to_ego
+        points = torch.cat(
+            (points[:, :, :, :, :, :2] * points[:, :, :, :, :, 2:3],
+             points[:, :, :, :, :, 2:]), 5)
+
+        combine = sensor2ego_mat.matmul(torch.inverse(intrin_mat))
+        points = combine.view(batch_size, num_cams, 1, 1, 1, 4,
+                              4).matmul(points)
+        if bda_mat is not None:
+            bda_mat = bda_mat.unsqueeze(1).repeat(1, num_cams, 1, 1).view(
+                batch_size, num_cams, 1, 1, 1, 4, 4)
+            points = (bda_mat @ points).squeeze(-1)
+        else:
+            points = points.squeeze(-1)
+        return points[..., :3]
+
     def _forward_single_sweep(self,
                               sweep_index,
                               sweep_imgs,
@@ -161,9 +217,8 @@ class FusionLSSFPN(BaseLSSFPN):
                                     source_features.shape[4]),
             mats_dict,
         )
-        depth = self.get_downsampled_lidar_depth(
-            lidar_depth.squeeze(1)).permute(0, 3, 1, 2)
-        img_feat_with_depth = depth.unsqueeze(1) * context.unsqueeze(2)
+        depth = self.get_downsampled_lidar_depth(lidar_depth.squeeze(1))
+        img_feat_with_depth = context.unsqueeze(2)
 
         img_feat_with_depth = self._forward_voxel_net(img_feat_with_depth)
 
@@ -176,6 +231,7 @@ class FusionLSSFPN(BaseLSSFPN):
             img_feat_with_depth.shape[4],
         )
         geom_xyz = self.get_geometry(
+            depth,
             mats_dict['sensor2ego_mats'][:, sweep_index, ...],
             mats_dict['intrin_mats'][:, sweep_index, ...],
             mats_dict['ida_mats'][:, sweep_index, ...],
@@ -184,7 +240,8 @@ class FusionLSSFPN(BaseLSSFPN):
         img_feat_with_depth = img_feat_with_depth.permute(0, 1, 3, 4, 5, 2)
         geom_xyz = ((geom_xyz - (self.voxel_coord - self.voxel_size / 2.0)) /
                     self.voxel_size).int()
-        feature_map = voxel_pooling(geom_xyz, img_feat_with_depth.contiguous(),
+        feature_map = voxel_pooling(geom_xyz,
+                                    img_feat_with_depth.contiguous().float(),
                                     self.voxel_num.cuda())
         return feature_map.contiguous()
 
@@ -275,12 +332,4 @@ class FusionLSSFPN(BaseLSSFPN):
         lidar_depth = lidar_depth.view(B * N, H // self.downsample_factor,
                                        W // self.downsample_factor)
 
-        lidar_depth = (lidar_depth -
-                       (self.d_bound[0] - self.d_bound[2])) / self.d_bound[2]
-        lidar_depth = torch.where(
-            (lidar_depth < self.depth_channels + 1) & (lidar_depth >= 0.0),
-            lidar_depth, torch.zeros_like(lidar_depth))
-        lidar_depth = F.one_hot(lidar_depth.long(),
-                                num_classes=self.depth_channels + 1)[..., 1:]
-
-        return lidar_depth.float()
+        return lidar_depth.unsqueeze(1)
