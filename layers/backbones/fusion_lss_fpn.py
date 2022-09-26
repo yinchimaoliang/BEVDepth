@@ -1,15 +1,125 @@
 # Copyright (c) Megvii Inc. All rights reserved.
 import torch
 import torch.nn.functional as F
+from mmdet3d.models import build_neck
+from mmdet.models import build_backbone
 
 from ops.voxel_pooling import voxel_pooling
 
-from .base_lss_fpn import BaseLSSFPN
+from .base_lss_fpn import BaseLSSFPN, DepthNet
 
 __all__ = ['FusionLSSFPN']
 
 
+class ContextNet(DepthNet):
+    def __init__(self, in_channels, mid_channels, context_channels,
+                 depth_channels):
+        super(ContextNet, self).__init__(in_channels, mid_channels,
+                                         context_channels, depth_channels)
+        del self.depth_conv
+
+    def forward(self, x, mats_dict):
+        intrins = mats_dict['intrin_mats'][:, 0:1, ..., :3, :3]
+        batch_size = intrins.shape[0]
+        num_cams = intrins.shape[2]
+        ida = mats_dict['ida_mats'][:, 0:1, ...]
+        sensor2ego = mats_dict['sensor2ego_mats'][:, 0:1, ..., :3, :]
+        bda = mats_dict['bda_mat'].view(batch_size, 1, 1, 4,
+                                        4).repeat(1, 1, num_cams, 1, 1)
+        mlp_input = torch.cat(
+            [
+                torch.stack(
+                    [
+                        intrins[:, 0:1, ..., 0, 0],
+                        intrins[:, 0:1, ..., 1, 1],
+                        intrins[:, 0:1, ..., 0, 2],
+                        intrins[:, 0:1, ..., 1, 2],
+                        ida[:, 0:1, ..., 0, 0],
+                        ida[:, 0:1, ..., 0, 1],
+                        ida[:, 0:1, ..., 0, 3],
+                        ida[:, 0:1, ..., 1, 0],
+                        ida[:, 0:1, ..., 1, 1],
+                        ida[:, 0:1, ..., 1, 3],
+                        bda[:, 0:1, ..., 0, 0],
+                        bda[:, 0:1, ..., 0, 1],
+                        bda[:, 0:1, ..., 1, 0],
+                        bda[:, 0:1, ..., 1, 1],
+                        bda[:, 0:1, ..., 2, 2],
+                    ],
+                    dim=-1,
+                ),
+                sensor2ego.view(batch_size, 1, num_cams, -1),
+            ],
+            -1,
+        )
+        mlp_input = self.bn(mlp_input.reshape(-1, mlp_input.shape[-1]))
+        x = self.reduce_conv(x)
+        context_se = self.context_mlp(mlp_input)[..., None, None]
+        context = self.context_se(x, context_se)
+        context = self.context_conv(context)
+        return context
+
+
 class FusionLSSFPN(BaseLSSFPN):
+    def __init__(self, x_bound, y_bound, z_bound, d_bound, final_dim,
+                 downsample_factor, output_channels, img_backbone_conf,
+                 img_neck_conf, depth_net_conf):
+        """Modified from `https://github.com/nv-tlabs/lift-splat-shoot`.
+
+        Args:
+            x_bound (list): Boundaries for x.
+            y_bound (list): Boundaries for y.
+            z_bound (list): Boundaries for z.
+            d_bound (list): Boundaries for d.
+            final_dim (list): Dimension for input images.
+            downsample_factor (int): Downsample factor between feature map
+                and input image.
+            output_channels (int): Number of channels for the output
+                feature map.
+            img_backbone_conf (dict): Config for image backbone.
+            img_neck_conf (dict): Config for image neck.
+            depth_net_conf (dict): Config for depth net.
+        """
+
+        super(BaseLSSFPN, self).__init__()
+        self.downsample_factor = downsample_factor
+        self.d_bound = d_bound
+        self.final_dim = final_dim
+        self.output_channels = output_channels
+
+        self.register_buffer(
+            'voxel_size',
+            torch.Tensor([row[2] for row in [x_bound, y_bound, z_bound]]))
+        self.register_buffer(
+            'voxel_coord',
+            torch.Tensor([
+                row[0] + row[2] / 2.0 for row in [x_bound, y_bound, z_bound]
+            ]))
+        self.register_buffer(
+            'voxel_num',
+            torch.LongTensor([(row[1] - row[0]) / row[2]
+                              for row in [x_bound, y_bound, z_bound]]))
+        self.register_buffer('frustum', self.create_frustum())
+        self.depth_channels, _, _, _ = self.frustum.shape
+
+        self.img_backbone = build_backbone(img_backbone_conf)
+        self.img_neck = build_neck(img_neck_conf)
+        self.context_net = self._configure_context_net(depth_net_conf)
+
+        self.img_neck.init_weights()
+        self.img_backbone.init_weights()
+
+    def _configure_context_net(self, depth_net_conf):
+        return ContextNet(
+            depth_net_conf['in_channels'],
+            depth_net_conf['mid_channels'],
+            self.output_channels,
+            self.depth_channels,
+        )
+
+    def _forward_context_net(self, feat, mats_dict):
+        return self.context_net(feat, mats_dict)
+
     def _forward_single_sweep(self,
                               sweep_index,
                               sweep_imgs,
@@ -44,26 +154,16 @@ class FusionLSSFPN(BaseLSSFPN):
             img_width = sweep_imgs.shape
         img_feats = self.get_cam_feats(sweep_imgs)
         source_features = img_feats[:, 0, ...]
-        depth_feature = self._forward_depth_net(
+        context = self._forward_context_net(
             source_features.reshape(batch_size * num_cams,
                                     source_features.shape[2],
                                     source_features.shape[3],
                                     source_features.shape[4]),
             mats_dict,
         )
-        if not is_return_depth:
-            depth = depth_feature[:, :self.depth_channels].softmax(1).permute(
-                0, 2, 3, 1)
-            lidar_depth_one_hot = self.get_downsampled_lidar_depth(
-                lidar_depth.squeeze(1))
-            fg_mask = torch.max(lidar_depth_one_hot, dim=-1).values > 0.0
-            depth[fg_mask] = lidar_depth_one_hot[fg_mask]
-            depth = depth.permute(0, 3, 1, 2)
-        else:
-            depth = depth_feature[:, :self.depth_channels].softmax(1)
-        img_feat_with_depth = depth.unsqueeze(
-            1) * depth_feature[:, self.depth_channels:(
-                self.depth_channels + self.output_channels)].unsqueeze(2)
+        depth = self.get_downsampled_lidar_depth(
+            lidar_depth.squeeze(1)).permute(0, 3, 1, 2)
+        img_feat_with_depth = depth.unsqueeze(1) * context.unsqueeze(2)
 
         img_feat_with_depth = self._forward_voxel_net(img_feat_with_depth)
 
@@ -86,8 +186,6 @@ class FusionLSSFPN(BaseLSSFPN):
                     self.voxel_size).int()
         feature_map = voxel_pooling(geom_xyz, img_feat_with_depth.contiguous(),
                                     self.voxel_num.cuda())
-        if is_return_depth:
-            return feature_map.contiguous(), depth
         return feature_map.contiguous()
 
     def forward(self,

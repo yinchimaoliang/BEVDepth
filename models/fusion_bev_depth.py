@@ -54,13 +54,9 @@ class FusionBEVDepth(BaseBEVDepth):
             tuple(list[dict]): Output results for tasks.
         """
         if self.is_train_depth and self.training:
-            x, depth_pred = self.backbone(x,
-                                          mats_dict,
-                                          lidar_depth,
-                                          timestamps,
-                                          is_return_depth=True)
+            x = self.backbone(x, mats_dict, lidar_depth, timestamps)
             preds = self.head(x)
-            return preds, depth_pred
+            return preds
         else:
             x = self.backbone(x, mats_dict, lidar_depth, timestamps)
             preds = self.head(x)
