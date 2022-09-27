@@ -325,9 +325,9 @@ class FusionLSSFPN(BaseLSSFPN):
         lidar_depth = lidar_depth.permute(0, 1, 3, 5, 2, 4).contiguous()
         lidar_depth = lidar_depth.view(
             -1, self.downsample_factor * self.downsample_factor)
-        gt_depths_tmp = torch.where(lidar_depth == 0.0,
-                                    1e5 * torch.ones_like(lidar_depth),
-                                    lidar_depth)
+        gt_depths_tmp = torch.where(
+            lidar_depth == 0.0, self.d_bound[1] * torch.ones_like(lidar_depth),
+            lidar_depth)
         lidar_depth = torch.min(gt_depths_tmp, dim=-1).values
         lidar_depth = lidar_depth.view(B * N, H // self.downsample_factor,
                                        W // self.downsample_factor)

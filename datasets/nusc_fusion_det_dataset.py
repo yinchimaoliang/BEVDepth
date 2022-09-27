@@ -13,6 +13,38 @@ from .nusc_mv_det_dataset import (NuscMVDetDataset, bev_transform,
 
 __all__ = ['NuscFusionDetDataset']
 
+# def depth_transform(cam_depth, resize, resize_dims, crop, flip, rotate):
+#     """Transform depth based on ida augmentation configuration.
+
+#     Args:
+#         cam_depth (np array): Nx3, 3: x,y,d.
+#         resize (float): Resize factor.
+#         resize_dims (list): Final dimension.
+#         crop (list): x1, y1, x2, y2
+#         flip (bool): Whether to flip.
+#         rotate (float): Rotation value.
+
+#     Returns:
+#         np array: [h/down_ratio, w/down_ratio, d]
+#     """
+
+#     H, W = resize_dims
+#     cam_depth[:, :2] = cam_depth[:, :2] * resize
+#     cam_depth[:, 0] -= crop[0]
+#     cam_depth[:, 1] -= crop[1]
+
+#     depth_coords = cam_depth[:, :2].astype(np.int16)
+
+#     depth_map = np.zeros(resize_dims)
+#     valid_mask = ((depth_coords[:, 1] < resize_dims[0])
+#                   & (depth_coords[:, 0] < resize_dims[1])
+#                   & (depth_coords[:, 1] >= 0)
+#                   & (depth_coords[:, 0] >= 0))
+#     depth_map[depth_coords[valid_mask, 1],
+#               depth_coords[valid_mask, 0]] = cam_depth[valid_mask, 2]
+
+#     return torch.Tensor(depth_map)
+
 
 class NuscFusionDetDataset(NuscMVDetDataset):
     def get_image(self, cam_infos, cam_names, lidar_infos=None):
@@ -213,7 +245,6 @@ class NuscFusionDetDataset(NuscMVDetDataset):
     def __getitem__(self, idx):
         if self.use_cbgs:
             idx = self.sample_indices[idx]
-        # idx = 0
         cam_infos = list()
         # TODO: Check if it still works when number of cameras is reduced.
         cams = self.choose_cams()
