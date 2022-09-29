@@ -1,69 +1,69 @@
 # Copyright (c) Megvii Inc. All rights reserved.
 import torch
 import torch.nn as nn
+from mmdet.models.backbones.resnet import BasicBlock
 
 from ops.voxel_pooling import voxel_pooling
 
-from .base_lss_fpn import BaseLSSFPN
-from .base_lss_fpn import DepthNet as BaseDepthNet
+from .base_lss_fpn import ASPP, BaseLSSFPN, Mlp, SELayer
 
 __all__ = ['FusionLSSFPN']
 
 
-class DepthNet(BaseDepthNet):
+class DepthNet(nn.Module):
     def __init__(self, in_channels, mid_channels, context_channels,
                  depth_channels):
-        super(DepthNet, self).__init__(in_channels, mid_channels,
-                                       context_channels, depth_channels)
-        self.lidar_depth_conv = nn.Sequential(
+        super(DepthNet, self).__init__()
+        self.reduce_conv = nn.Sequential(
+            nn.Conv2d(in_channels,
+                      mid_channels,
+                      kernel_size=3,
+                      stride=1,
+                      padding=1),
+            nn.BatchNorm2d(mid_channels),
+            nn.ReLU(inplace=True),
+        )
+        self.context_conv = nn.Conv2d(mid_channels,
+                                      context_channels,
+                                      kernel_size=1,
+                                      stride=1,
+                                      padding=0)
+        self.mlp = Mlp(1, mid_channels, mid_channels)
+        self.se = SELayer(mid_channels)  # NOTE: add camera-aware
+        self.depth_gt_conv = nn.Sequential(
             nn.Conv2d(1, mid_channels, kernel_size=1, stride=1),
             nn.ReLU(inplace=True),
             nn.Conv2d(mid_channels, mid_channels, kernel_size=1, stride=1),
         )
-
-    def forward(self, x, mats_dict, lidar_depth):
-        intrins = mats_dict['intrin_mats'][:, 0:1, ..., :3, :3]
-        batch_size = intrins.shape[0]
-        num_cams = intrins.shape[2]
-        ida = mats_dict['ida_mats'][:, 0:1, ...]
-        sensor2ego = mats_dict['sensor2ego_mats'][:, 0:1, ..., :3, :]
-        bda = mats_dict['bda_mat'].view(batch_size, 1, 1, 4,
-                                        4).repeat(1, 1, num_cams, 1, 1)
-        mlp_input = torch.cat(
-            [
-                torch.stack(
-                    [
-                        intrins[:, 0:1, ..., 0, 0],
-                        intrins[:, 0:1, ..., 1, 1],
-                        intrins[:, 0:1, ..., 0, 2],
-                        intrins[:, 0:1, ..., 1, 2],
-                        ida[:, 0:1, ..., 0, 0],
-                        ida[:, 0:1, ..., 0, 1],
-                        ida[:, 0:1, ..., 0, 3],
-                        ida[:, 0:1, ..., 1, 0],
-                        ida[:, 0:1, ..., 1, 1],
-                        ida[:, 0:1, ..., 1, 3],
-                        bda[:, 0:1, ..., 0, 0],
-                        bda[:, 0:1, ..., 0, 1],
-                        bda[:, 0:1, ..., 1, 0],
-                        bda[:, 0:1, ..., 1, 1],
-                        bda[:, 0:1, ..., 2, 2],
-                    ],
-                    dim=-1,
-                ),
-                sensor2ego.view(batch_size, 1, num_cams, -1),
-            ],
-            -1,
+        self.depth_conv = nn.Sequential(
+            BasicBlock(mid_channels, mid_channels),
+            BasicBlock(mid_channels, mid_channels),
+            BasicBlock(mid_channels, mid_channels),
         )
-        mlp_input = self.bn(mlp_input.reshape(-1, mlp_input.shape[-1]))
+        self.aspp = ASPP(mid_channels, mid_channels)
+        self.depth_pred = nn.Conv2d(mid_channels,
+                                    depth_channels,
+                                    kernel_size=1,
+                                    stride=1,
+                                    padding=0)
+
+    def forward(self, x, mats_dict, lidar_depth, scale_depth_factor=1000.0):
         x = self.reduce_conv(x)
-        context_se = self.context_mlp(mlp_input)[..., None, None]
-        context = self.context_se(x, context_se)
-        context = self.context_conv(context)
-        depth_se = self.depth_mlp(mlp_input)[..., None, None]
-        depth = self.lidar_depth_conv(lidar_depth)
-        depth = self.depth_se(x + depth, depth_se)
-        depth = self.depth_conv(depth)
+        context = self.context_conv(x)
+        inv_intrinsics = torch.inverse(mats_dict['intrin_mats'])
+        pixel_size = torch.norm(torch.stack(
+            [inv_intrinsics[..., 0, 0], inv_intrinsics[..., 1, 1]], dim=-1),
+                                dim=-1).reshape(-1, 1)
+        aug_scale = torch.sqrt(mats_dict['ida_mats'][..., 0, 0]**2 +
+                               mats_dict['ida_mats'][..., 0, 1]**2).reshape(
+                                   -1, 1)
+        scaled_pixel_size = pixel_size * scale_depth_factor / aug_scale
+        x_se = self.mlp(scaled_pixel_size)[..., None, None]
+        x = self.se(x, x_se)
+        depth = self.depth_gt_conv(lidar_depth)
+        depth = self.depth_conv(x + depth)
+        depth = self.aspp(depth)
+        depth = self.depth_pred(depth)
         return torch.cat([depth, context], dim=1)
 
 
