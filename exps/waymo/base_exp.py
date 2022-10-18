@@ -26,10 +26,10 @@ img_conf = dict(img_mean=[123.675, 116.28, 103.53],
                 to_rgb=True)
 
 backbone_conf = {
-    'x_bound': [-64, 64, 0.32],
-    'y_bound': [-64, 64, 0.32],
-    'z_bound': [-2, 4, 6],
-    'd_bound': [2.0, 66, 0.5],
+    'x_bound': [-51.2, 51.2, 0.8],
+    'y_bound': [-51.2, 51.2, 0.8],
+    'z_bound': [-5, 3, 8],
+    'd_bound': [2.0, 58.0, 0.5],
     'final_dim':
     final_dim,
     'output_channels':
@@ -56,7 +56,7 @@ backbone_conf = {
     dict(in_channels=512, mid_channels=512)
 }
 ida_aug_conf = {
-    'resize_lim': (0.2, 0.4),
+    'resize_lim': (0.3, 0.4),
     'final_dim': final_dim,
     'rot_lim': (-5.4, 5.4),
     'H': H,
@@ -94,28 +94,27 @@ bev_neck = dict(type='SECONDFPN',
 CLASSES = ['Vehicle', 'Pedestrian', 'Cyclist']
 
 TASKS = [
-    dict(num_class=1, class_names=['Vehicle']),
-    dict(num_class=2, class_names=['Pedestrian', 'Cyclist'])
+    dict(num_class=3, class_names=['Vehicle', 'Pedestrian', 'Cyclist'])
 ]
 
 common_heads = dict(reg=(2, 2), height=(1, 2), dim=(3, 2), rot=(2, 2))
 
 bbox_coder = dict(
     type='CenterPointBBoxCoder',
-    post_center_range=[-70, -70, -10.0, 70, 70, 10.0],
+    post_center_range=[-61.2, -61.2, -10.0, 61.2, 61.2, 10.0],
     max_num=500,
     score_threshold=0.01,
-    out_size_factor=1,
-    voxel_size=[0.32, 0.32, 6.0],
-    pc_range=[-64, -64, -2, 64, 64, 4.0],
+    out_size_factor=4,
+    voxel_size=[0.2, 0.2, 8],
+    pc_range=[-51.2, -51.2, -5, 51.2, 51.2, 3],
     code_size=7,
 )
 
 train_cfg = dict(
-    point_cloud_range=[-64, -64, -2, 64, 64, 4.0],
-    grid_size=[400, 400, 1],
-    voxel_size=[0.32, 0.32, 6.0],
-    out_size_factor=1,
+    point_cloud_range=[-51.2, -51.2, -5, 51.2, 51.2, 3],
+    grid_size=[512, 512, 1],
+    voxel_size=[0.2, 0.2, 8],
+    out_size_factor=4,
     dense_reg=1,
     gaussian_overlap=0.1,
     max_objs=500,
@@ -124,13 +123,13 @@ train_cfg = dict(
 )
 
 test_cfg = dict(
-    post_center_limit_range=[-70, -70, -10.0, 70, 70, 10.0],
+    post_center_limit_range=[-61.2, -61.2, -10.0, 61.2, 61.2, 10.0],
     max_per_img=500,
     max_pool_nms=False,
-    min_radius=[1, 0.1],
+    min_radius=[1, 0.175],
     score_threshold=0.01,
-    out_size_factor=1,
-    voxel_size=[0.32, 0.32, 6],
+    out_size_factor=4,
+    voxel_size=[0.2, 0.2, 8],
     nms_type='circle',
     pre_max_size=1000,
     post_max_size=83,
@@ -200,7 +199,7 @@ class BEVDepthLightningModel(LightningModule):
         self.depth_channels = int(
             (self.dbound[1] - self.dbound[0]) / self.dbound[2])
         self.use_fusion = False
-        self.train_info_paths = 'data/waymo/v1.4/waymo_infos_training.pkl'
+        self.train_info_paths = 'data/waymo/v1.4/waymo_infos_validation.pkl'
         self.val_info_paths = 'data/waymo/v1.4/waymo_infos_validation.pkl'
         # self.predict_info_paths = 'data/waymo/v1.4/waymo_infos_train.pkl'
         self.lidar_keys = LIDAR_KEYS
@@ -226,10 +225,10 @@ class BEVDepthLightningModel(LightningModule):
         if len(lidar_depth.shape) == 5:
             # only key-frame will calculate depth loss
             lidar_depth = lidar_depth[:, 0, ...]
-        depth_loss = self.get_depth_loss(lidar_depth.cuda(), depth_preds)
+        # depth_loss = self.get_depth_loss(lidar_depth.cuda(), depth_preds)
         self.log('detection_loss', detection_loss)
-        self.log('depth_loss', depth_loss)
-        return detection_loss + depth_loss
+        # self.log('depth_loss', depth_loss)
+        return detection_loss
 
     def get_depth_loss(self, depth_labels, depth_preds):
         depth_labels = self.get_downsampled_gt_depth(depth_labels)
