@@ -26,10 +26,10 @@ img_conf = dict(img_mean=[123.675, 116.28, 103.53],
                 to_rgb=True)
 
 backbone_conf = {
-    'x_bound': [-64, 64, 1.],
-    'y_bound': [-64, 64, 1.],
+    'x_bound': [-40, 80, 1.],
+    'y_bound': [-80, 80, 1.],
     'z_bound': [-2, 4, 6],
-    'd_bound': [2.0, 66, 0.5],
+    'd_bound': [2.0, 80, 0.5],
     'final_dim':
     final_dim,
     'output_channels':
@@ -95,7 +95,8 @@ CLASSES = ['Vehicle', 'Pedestrian', 'Cyclist']
 
 TASKS = [
     dict(num_class=1, class_names=['Vehicle']),
-    dict(num_class=2, class_names=['Pedestrian', 'Cyclist'])
+    dict(num_class=1, class_names=['Pedestrian']),
+    dict(num_class=1, class_names=['Cyclist'])
 ]
 
 common_heads = dict(reg=(2, 2), height=(1, 2), dim=(3, 2), rot=(2, 2))
@@ -112,8 +113,8 @@ bbox_coder = dict(
 )
 
 train_cfg = dict(
-    point_cloud_range=[-64, -64, -2, 64, 64, 4.0],
-    grid_size=[512, 512, 1],
+    point_cloud_range=[-40, -80, -2, 80, 80, 4.0],
+    grid_size=[480, 640, 1],
     voxel_size=[0.25, 0.25, 6.0],
     out_size_factor=4,
     dense_reg=1,
@@ -124,7 +125,7 @@ train_cfg = dict(
 )
 
 test_cfg = dict(
-    post_center_limit_range=[-70, -70, -10.0, 70, 70, 10.0],
+    post_center_limit_range=[-45, -84, -10.0, 85, 85, 10.0],
     max_per_img=500,
     max_pool_nms=False,
     min_radius=[4, 0.25],
@@ -176,7 +177,7 @@ class BEVDepthLightningModel(LightningModule):
         self.eval_interval = eval_interval
         self.batch_size_per_device = batch_size_per_device
         self.data_root = data_root
-        self.basic_lr_per_img = 2e-4 / 64
+        self.basic_lr_per_img = 2e-4 / 32
         self.class_names = class_names
         self.backbone_conf = backbone_conf
         self.head_conf = head_conf
