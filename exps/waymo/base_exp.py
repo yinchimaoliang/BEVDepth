@@ -95,8 +95,7 @@ CLASSES = ['Vehicle', 'Pedestrian', 'Cyclist']
 
 TASKS = [
     dict(num_class=1, class_names=['Vehicle']),
-    dict(num_class=1, class_names=['Pedestrian']),
-    dict(num_class=1, class_names=['Cyclist'])
+    dict(num_class=2, class_names=['Pedestrian', 'Cyclist'])
 ]
 
 common_heads = dict(reg=(2, 2), height=(1, 2), dim=(3, 2), rot=(2, 2))
@@ -132,7 +131,7 @@ test_cfg = dict(
     score_threshold=0.3,
     out_size_factor=4,
     voxel_size=[0.25, 0.25, 6],
-    nms_type='circle',
+    nms_type='rotate',
     pre_max_size=1000,
     post_max_size=200,
     nms_thr=0.2,
