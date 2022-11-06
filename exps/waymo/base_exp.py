@@ -103,12 +103,12 @@ common_heads = dict(reg=(2, 2), height=(1, 2), dim=(3, 2), rot=(2, 2))
 
 bbox_coder = dict(
     type='CenterPointBBoxCoder',
-    post_center_range=[-70, -70, -10.0, 70, 70, 10.0],
+    post_center_range=[-45, -85, -10.0, 85, 85, 10.0],
     max_num=500,
     score_threshold=0.1,
     out_size_factor=4,
     voxel_size=[0.25, 0.25, 6.0],
-    pc_range=[-64, -64, -2, 64, 64, 4.0],
+    pc_range=[-40, -80, -2, 80, 80, 4.0],
     code_size=7,
 )
 
@@ -128,7 +128,7 @@ test_cfg = dict(
     post_center_limit_range=[-45, -84, -10.0, 85, 85, 10.0],
     max_per_img=500,
     max_pool_nms=False,
-    min_radius=[4, 0.25],
+    min_radius=[4, 0.85, 0.175],
     score_threshold=0.3,
     out_size_factor=4,
     voxel_size=[0.25, 0.25, 6],
