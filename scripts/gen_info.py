@@ -146,12 +146,12 @@ def save_label(frame, objects, version='multi-view', cam_sync=True):
             objects.objects.append(o)
 
 
-def save_range_image(frame,
-                     cur_save_path,
-                     file_name,
-                     lidar_names,
-                     lidar_infos,
-                     return_indexes=[0, 1]):
+def save_lidar_points(frame,
+                      cur_save_path,
+                      file_name,
+                      lidar_names,
+                      lidar_infos,
+                      return_indexes=[0, 1]):
     """
     Modified from the codes of Waymo Open Dataset.
     Convert range images to point cloud.
@@ -172,11 +172,8 @@ def save_range_image(frame,
         frame_utils.parse_range_image_and_camera_projection(frame)
     calibrations = sorted(frame.context.laser_calibrations,
                           key=lambda c: c.name)
-
+    all_lidar_points = list()
     for calib in calibrations:
-        point_clouds = []
-        range_image_idxes = []
-        range_image_shapes = []
         range_image_infos = []
         for ri_index in return_indexes:
             single_lidar_info = dict()
@@ -242,21 +239,11 @@ def save_range_image(frame,
                 range_image_elongation, range_image_NLZ, range_image_depth
             ],
                                          axis=-1)
-            point_clouds.append(point_cloud[range_image_idx])
-            range_image_idxes.append(range_image_idx)
-            range_image_shapes.append(range_image_np.shape)
-        lidar_infos[lidar_names[calib.name]] = dict()
-        lidar_infos[lidar_names[
-            calib.name]]['range_image_infos'] = range_image_infos
-        save_path = os.path.join(cur_save_path, lidar_names[calib.name])
-        lidar_infos[lidar_names[calib.name]]['filename'] = os.path.join(
-            *save_path.split(os.sep)[-3:], file_name)
-        mmcv.mkdir_or_exist(save_path)
-
-        save_dict = dict(point_clouds=point_clouds,
-                         range_image_idxes=range_image_idxes,
-                         range_image_shapes=range_image_shapes)
-        mmcv.dump(save_dict, os.path.join(save_path, file_name))
+            all_lidar_points.append(point_cloud[range_image_idx])
+    lidar_infos['lidar_points_path'] = os.path.join(
+        *cur_save_path.split(os.sep)[3:], file_name)
+    all_lidar_points = np.concatenate(all_lidar_points, 0)
+    all_lidar_points.tofile(cur_save_path, file_name)
 
 
 class tfrecord_decode_iterator(object):
@@ -413,24 +400,17 @@ def parse_waymo_samples(example_proto, idx, directory, tfrecord):
     info['time_of_day'] = frame.context.stats.time_of_day
     info['timestamp'] = frame.timestamp_micros
     tf_name = tfrecord.split('.')[0]
-    range_image_target_path = os.path.join(directory, 'range_images')
+    range_image_target_path = os.path.join(directory, 'lidar_points')
     image_target_path = os.path.join(directory, 'images')
     mmcv.mkdir_or_exist(range_image_target_path)
-    lidar_file_name = f'{tf_name}_{idx}.pkl'
+    lidar_file_name = f'{tf_name}_{idx}.bin'
     cam_file_name = f'{tf_name}_{idx}.png'
 
     # Remove it when generating range_image is not needed.
-    save_range_image(frame, range_image_target_path, lidar_file_name,
-                     LIDAR_NAMES, lidar_infos)
+    save_lidar_points(frame, range_image_target_path, lidar_file_name,
+                      LIDAR_NAMES, lidar_infos)
     save_image(frame, image_target_path, cam_file_name, CAMERA_NAMES,
                cam_infos)
-    # range_image_path of all sensors.
-    range_image_path = dict()
-    for sensor_name in LIDAR_NAMES[1:]:
-        range_image_path[sensor_name] = os.path.join('range_image',
-                                                     sensor_name,
-                                                     lidar_file_name)
-    lidar_infos['range_image_path'] = range_image_path
     info['lidar_infos'] = lidar_infos
     info['cam_infos'] = cam_infos
     return info

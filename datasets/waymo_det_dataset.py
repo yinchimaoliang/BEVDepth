@@ -65,14 +65,10 @@ class WaymoDetDataset(BaseDetDataset):
         sweep_lidar_depth = list()
         if self.return_depth or self.use_fusion:
             for lidar_infos in lidar_infos_sweeps:
-                lidar_points = []
-                for lidar_key in self.lidar_keys:
-                    range_image = mmcv.load(
-                        os.path.join(self.data_root,
-                                     lidar_infos[lidar_key]['filename']))
-                    lidar_points.extend(range_image['point_clouds'])
-                lidar_points = np.concatenate(lidar_points, axis=0)
-                lidar_points = lidar_points.astype(np.float32)[:, :5]
+                lidar_points = np.fromfile(os.path.join(
+                    self.data_root, lidar_infos['lidar_points_path']),
+                                           dtype=np.float32).reshape(-1, 7)
+                lidar_points = lidar_points[:, :5]
                 sweep_lidar_points.append(lidar_points)
         T_front_cam_to_ref = np.array([[0.0, -1.0, 0.0, 0.0],
                                        [0.0, 0.0, -1.0, 0.0],
