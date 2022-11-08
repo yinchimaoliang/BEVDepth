@@ -56,7 +56,7 @@ backbone_conf = {
     dict(in_channels=512, mid_channels=512)
 }
 ida_aug_conf = {
-    'resize_lim': (0.2, 0.4),
+    'resize_lim': (0.25, 0.4),
     'final_dim': final_dim,
     'rot_lim': (-5.4, 5.4),
     'H': H,
@@ -70,7 +70,7 @@ ida_aug_conf = {
 bda_aug_conf = {
     'rot_lim': (-22.5, 22.5),
     'scale_lim': (0.95, 1.05),
-    'flip_dx_ratio': 0.5,
+    'flip_dx_ratio': 0.,
     'flip_dy_ratio': 0.5
 }
 
