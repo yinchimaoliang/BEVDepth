@@ -243,7 +243,7 @@ def save_lidar_points(frame,
     lidar_infos['lidar_points_path'] = os.path.join(
         *cur_save_path.split(os.sep)[3:], file_name)
     all_lidar_points = np.concatenate(all_lidar_points, 0)
-    all_lidar_points.tofile(cur_save_path, file_name)
+    all_lidar_points.tofile(os.path.join(cur_save_path, file_name))
 
 
 class tfrecord_decode_iterator(object):
@@ -400,15 +400,16 @@ def parse_waymo_samples(example_proto, idx, directory, tfrecord):
     info['time_of_day'] = frame.context.stats.time_of_day
     info['timestamp'] = frame.timestamp_micros
     tf_name = tfrecord.split('.')[0]
-    range_image_target_path = os.path.join(directory, 'lidar_points')
+    lidar_points_path = os.path.join(directory, 'lidar_points')
     image_target_path = os.path.join(directory, 'images')
-    mmcv.mkdir_or_exist(range_image_target_path)
+    mmcv.mkdir_or_exist(lidar_points_path)
     lidar_file_name = f'{tf_name}_{idx}.bin'
     cam_file_name = f'{tf_name}_{idx}.png'
 
+    mmcv.mkdir_or_exist(lidar_points_path)
     # Remove it when generating range_image is not needed.
-    save_lidar_points(frame, range_image_target_path, lidar_file_name,
-                      LIDAR_NAMES, lidar_infos)
+    save_lidar_points(frame, lidar_points_path, lidar_file_name, LIDAR_NAMES,
+                      lidar_infos)
     save_image(frame, image_target_path, cam_file_name, CAMERA_NAMES,
                cam_infos)
     info['lidar_infos'] = lidar_infos
@@ -642,6 +643,23 @@ def main():
                 frame.ParseFromString(bytearray(data.numpy()))
                 save_label(frame, objects)
             progress_bar.update()
+        testing_dir = os.path.join('./data', 'waymo', args.dataset_version,
+                                   'testing')
+        testing_tfrecords = list(
+            filter(lambda x: x.endswith('.tfrecord'), os.listdir(testing_dir)))
+        with futures.ThreadPoolExecutor(args.num_workers) as executor:
+            testing_tfrecord_infos = list(
+                tqdm(executor.map(generate_waymo_info,
+                                  [testing_dir] * len(testing_tfrecords),
+                                  testing_tfrecords),
+                     total=len(testing_tfrecords)))
+        waymo_infos_testing = list()
+        for testing_tfrecord_info in testing_tfrecord_infos:
+            waymo_infos_testing.extend(testing_tfrecord_info)
+        mmcv.dump(
+            waymo_infos_testing,
+            os.path.join('./data', 'waymo', args.dataset_version,
+                         'waymo_infos_testing.pkl'))
 
         # Write objects to a file.
         f = open(
