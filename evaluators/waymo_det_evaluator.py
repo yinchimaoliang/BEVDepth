@@ -246,10 +246,10 @@ class DetWaymoEvaluator(tf.test.TestCase):
         self.class_names = class_names
         self.dump_path = dump_path
 
-    def format(self, results, gt_for_eval, dump_path=None):
-        assert len(results) == len(gt_for_eval)
+    def dump_results(self, results, img_metas, dump_path=None):
+        assert len(results) == len(img_metas)
         results_for_dump = list()
-        for cur_result, cur_gt in zip(results, gt_for_eval):
+        for cur_result, img_meta in zip(results, img_metas):
             # parse predicted results
             labels_class = list()
             bbox3d_filtered = list()
@@ -270,18 +270,18 @@ class DetWaymoEvaluator(tf.test.TestCase):
             cur_result_dict['scores3d'] = torch.Tensor(score_filtered) if len(
                 bbox3d_filtered) else torch.Tensor([])
             results_for_dump.append(cur_result_dict)
-        self.dump_results(copy.deepcopy(results_for_dump),
-                          copy.deepcopy(gt_for_eval),
-                          os.path.join(self.dump_path, './predictions.bin'))
+        self.format_results(copy.deepcopy(results_for_dump),
+                            copy.deepcopy(img_metas),
+                            os.path.join(self.dump_path, './predictions.bin'))
 
-    def dump_results(self, results, gt_for_eval, dump_path):
+    def format_results(self, results, gt_for_eval, dump_path):
         # Generate pred.
         pred_objects = metrics_pb2.Objects()
         for i, pred in enumerate(results):
             bboxes3d = pred['bboxes3d']
             scores3d = pred['scores3d']
             labels3d = pred['labels3d']
-            gt = gt_for_eval[i][0]
+            gt = gt_for_eval[i]
 
             for j, bbox3d in enumerate(bboxes3d):
                 score = scores3d[j]
@@ -308,7 +308,7 @@ class DetWaymoEvaluator(tf.test.TestCase):
             f.write(pred_objects.SerializeToString())
 
     def evaluate(self, prediction_infos, gt_infos):
-        self.format(prediction_infos, gt_infos)
+        self.dump_results(prediction_infos, gt_infos)
 
         GROUND_TRUTHS_BIN = './data/waymo/v1.4/cam_gt.bin'
         PREDICTIONS_BIN = os.path.join(self.dump_path, 'predictions.bin')

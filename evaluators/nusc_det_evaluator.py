@@ -116,12 +116,12 @@ class DetNuscEvaluator():
         detail['{}/mAP'.format(metric_prefix)] = metrics['mean_ap']
         return detail
 
-    def format_results(self,
-                       results,
-                       img_metas,
-                       result_names=['img_bbox'],
-                       jsonfile_prefix=None,
-                       **kwargs):
+    def dump_all_results(self,
+                         results,
+                         img_metas,
+                         result_names=['img_bbox'],
+                         jsonfile_prefix=None,
+                         **kwargs):
         """Format the results to json (standard format for COCO evaluation).
 
         Args:
@@ -162,12 +162,12 @@ class DetNuscEvaluator():
             if self.output_dir:
                 result_files.update({
                     rasult_name:
-                    self._format_bbox(results, img_metas, self.output_dir)
+                    self.dump_results(results, img_metas, self.output_dir)
                 })
             else:
                 result_files.update({
                     rasult_name:
-                    self._format_bbox(results, img_metas, tmp_file_)
+                    self.dump_results(results, img_metas, tmp_file_)
                 })
         return result_files, tmp_dir
 
@@ -203,9 +203,9 @@ class DetNuscEvaluator():
         Returns:
             dict[str, float]: Results of each evaluation metric.
         """
-        result_files, tmp_dir = self.format_results(results, img_metas,
-                                                    result_names,
-                                                    jsonfile_prefix)
+        result_files, tmp_dir = self.dump_all_results(results, img_metas,
+                                                      result_names,
+                                                      jsonfile_prefix)
         if isinstance(result_files, dict):
             for name in result_names:
                 print('Evaluating bboxes of {}'.format(name))
@@ -216,7 +216,7 @@ class DetNuscEvaluator():
         if tmp_dir is not None:
             tmp_dir.cleanup()
 
-    def _format_bbox(self, results, img_metas, jsonfile_prefix=None):
+    def dump_results(self, results, img_metas, jsonfile_prefix=None):
         """Convert the results to the standard format.
 
         Args:

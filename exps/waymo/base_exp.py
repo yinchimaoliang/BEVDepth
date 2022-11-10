@@ -201,7 +201,7 @@ class BEVDepthLightningModel(LightningModule):
         self.use_fusion = False
         self.train_info_paths = 'data/waymo/v1.4/waymo_infos_training.pkl'
         self.val_info_paths = 'data/waymo/v1.4/waymo_infos_validation.pkl'
-        # self.predict_info_paths = 'data/waymo/v1.4/waymo_infos_train.pkl'
+        self.predict_info_paths = 'data/waymo/v1.4/waymo_infos_testing.pkl'
         self.lidar_keys = LIDAR_KEYS
 
     def forward(self, sweep_imgs, mats):
@@ -283,7 +283,7 @@ class BEVDepthLightningModel(LightningModule):
         return gt_depths.float()
 
     def eval_step(self, batch, batch_idx, prefix: str):
-        (sweep_imgs, mats, _, img_metas, gt_boxes, _, gt_classes3d) = batch
+        (sweep_imgs, mats, _, img_metas, gt_boxes3d, _, gt_classes3d) = batch
         if torch.cuda.is_available():
             for key, value in mats.items():
                 mats[key] = value.cuda()
@@ -297,9 +297,9 @@ class BEVDepthLightningModel(LightningModule):
             results[i][0] = results[i][0].detach().cpu().numpy()
             results[i][1] = results[i][1].detach().cpu().numpy()
             results[i][2] = results[i][2].detach().cpu().numpy()
+            img_metas[i]['gt_boxes3d'] = gt_boxes3d[i].detach().cpu().numpy()
+            img_metas[i]['gt_classes3d'] = gt_classes3d[i]
             results[i].append(img_metas[i])
-            results[i].append(gt_boxes[i].detach().cpu().numpy())
-            results[i].append(gt_classes3d[i])
         return results
 
     def test_epoch_end(self, test_step_outputs):
@@ -315,7 +315,7 @@ class BEVDepthLightningModel(LightningModule):
                 ]
                 prediction_infos.append(
                     [pred_bboxes, pred_scores, pred_classes])
-                gt_infos.append(test_step_output[i][3:])
+                gt_infos.append(test_step_output[i][3])
         synchronize()
         # TODO: Change another way.
         dataset_length = len(self.val_dataloader().dataset)
@@ -419,7 +419,27 @@ class BEVDepthLightningModel(LightningModule):
         return self.eval_step(batch, batch_idx, 'test')
 
     def predict_step(self, batch, batch_idx):
-        return self.eval_step(batch, batch_idx, 'predict')
+        (sweep_imgs, mats, _, img_metas, gt_boxes3d, _, gt_classes3d) = batch
+        if torch.cuda.is_available():
+            for key, value in mats.items():
+                mats[key] = value.cuda()
+            sweep_imgs = sweep_imgs.cuda()
+        preds = self.model(sweep_imgs, mats)
+        if isinstance(self.model, torch.nn.parallel.DistributedDataParallel):
+            results = self.model.module.get_bboxes(preds, img_metas)
+        else:
+            results = self.model.get_bboxes(preds, img_metas)
+        for i in range(len(results)):
+            pred_classes = [
+                self.class_names[pred_id] for pred_id in results[i][2]
+            ]
+            results[i][0] = results[i][0].detach().cpu().numpy()
+            results[i][1] = results[i][2].detach().cpu().numpy()
+            results[i][2] = pred_classes
+            img_metas[i]['gt_boxes3d'] = gt_boxes3d[i].detach().cpu().numpy()
+            img_metas[i]['gt_classes3d'] = gt_classes3d[i]
+            results[i].append(img_metas[i])
+        return results
 
     @staticmethod
     def add_model_specific_args(parent_parser):  # pragma: no-cover

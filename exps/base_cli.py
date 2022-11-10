@@ -61,13 +61,13 @@ def run_cli(model_class, exp_name='base_exp', use_ema=False):
                 all_pred_results.append(predict_step_output[i][:3])
                 all_img_metas.append(predict_step_output[i][3])
         synchronize()
-        len_dataset = len(model.test_dataloader().dataset)
+        len_dataset = len(model.predict_dataloader().dataset)
         all_pred_results = sum(
             map(list, zip(*all_gather_object(all_pred_results))),
             [])[:len_dataset]
         all_img_metas = sum(map(list, zip(*all_gather_object(all_img_metas))),
                             [])[:len_dataset]
-        model.evaluator._format_bbox(all_pred_results, all_img_metas,
+        model.evaluator.dump_results(all_pred_results, all_img_metas,
                                      os.path.dirname(args.ckpt_path))
     else:
         trainer.fit(model)
