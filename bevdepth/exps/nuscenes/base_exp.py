@@ -12,11 +12,11 @@ from pytorch_lightning.core import LightningModule
 from torch.cuda.amp.autocast_mode import autocast
 from torch.optim.lr_scheduler import MultiStepLR
 
-from datasets.base_det_dataset import collate_fn
-from datasets.nusc_det_dataset import NuscDetDataset
-from evaluators.nusc_det_evaluator import DetNuscEvaluator
-from models.base_bev_depth import BaseBEVDepth
-from utils.torch_dist import all_gather_object, get_rank, synchronize
+from bevdepth.datasets.base_det_dataset import collate_fn
+from bevdepth.datasets.nusc_det_dataset import NuscDetDataset
+from bevdepth.evaluators.nusc_det_evaluator import DetNuscEvaluator
+from bevdepth.models.base_bev_depth import BaseBEVDepth
+from bevdepth.utils.torch_dist import all_gather_object, get_rank, synchronize
 
 H = 900
 W = 1600

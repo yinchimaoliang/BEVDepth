@@ -4,10 +4,10 @@ import torch.nn.parallel
 import torch.utils.data
 import torch.utils.data.distributed
 
-from exps.base_cli import run_cli
-from exps.nuscenes.base_exp import \
+from bevdepth.exps.base_cli import run_cli
+from bevdepth.exps.nuscenes.base_exp import \
     BEVDepthLightningModel as BaseBEVDepthLightningModel
-from models.fusion_bev_depth import FusionBEVDepth
+from bevdepth.models.fusion_bev_depth import FusionBEVDepth
 
 
 class BEVDepthLightningModel(BaseBEVDepthLightningModel):

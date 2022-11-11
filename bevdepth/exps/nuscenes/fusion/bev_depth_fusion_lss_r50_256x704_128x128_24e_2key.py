@@ -1,6 +1,7 @@
 # Copyright (c) Megvii Inc. All rights reserved.
-from exps.base_cli import run_cli
 from models.fusion_bev_depth import FusionBEVDepth
+
+from bevdepth.exps.base_cli import run_cli
 
 from .bev_depth_fusion_lss_r50_256x704_128x128_24e import \
     BEVDepthLightningModel as BaseBEVDepthLightningModel

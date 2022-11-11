@@ -1,7 +1,7 @@
 # Copyright (c) Megvii Inc. All rights reserved.
 
-from exps.base_cli import run_cli
-from exps.waymo.base_exp import \
+from bevdepth.exps.base_cli import run_cli
+from bevdepth.exps.waymo.base_exp import \
     BEVDepthLightningModel as BaseBEVDepthLightningModel
 
 
