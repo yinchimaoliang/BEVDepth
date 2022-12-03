@@ -1,4 +1,5 @@
 # Copyright (c) Megvii Inc. All rights reserved.
+import os
 from functools import partial
 
 import mmcv
@@ -227,9 +228,12 @@ class BEVDepthLightningModel(LightningModule):
         self.depth_channels = int(
             (self.dbound[1] - self.dbound[0]) / self.dbound[2])
         self.use_fusion = False
-        self.train_info_paths = 'data/nuScenes/nuscenes_infos_train.pkl'
-        self.val_info_paths = 'data/nuScenes/nuscenes_infos_val.pkl'
-        self.predict_info_paths = 'data/nuScenes/nuscenes_infos_test.pkl'
+        self.train_info_paths = os.path.join(self.data_root,
+                                             'nuscenes_infos_train.pkl')
+        self.val_info_paths = os.path.join(self.data_root,
+                                           'nuscenes_infos_val.pkl')
+        self.predict_info_paths = os.path.join(self.data_root,
+                                               'nuscenes_infos_test.pkl')
 
     def forward(self, sweep_imgs, mats):
         return self.model(sweep_imgs, mats)
@@ -322,7 +326,7 @@ class BEVDepthLightningModel(LightningModule):
         else:
             results = self.model.get_bboxes(preds, img_metas)
         for i in range(len(results)):
-            results[i][0] = results[i][0].tensor.detach().cpu().numpy()
+            results[i][0] = results[i][0].detach().cpu().numpy()
             results[i][1] = results[i][1].detach().cpu().numpy()
             results[i][2] = results[i][2].detach().cpu().numpy()
             results[i].append(img_metas[i])

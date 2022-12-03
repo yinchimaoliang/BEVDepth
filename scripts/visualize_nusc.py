@@ -1,6 +1,7 @@
 import os
 from argparse import ArgumentParser
 
+import cv2
 import matplotlib.cm as cm
 import matplotlib.pyplot as plt
 import mmcv
@@ -214,6 +215,8 @@ def demo(
 
         img = mmcv.imread(
             os.path.join('data/nuScenes', info['cam_infos'][k]['filename']))
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
         # Draw images
         plt.imshow(img)
 

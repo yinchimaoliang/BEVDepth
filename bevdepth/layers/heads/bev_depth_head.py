@@ -1,8 +1,10 @@
 """Inherited from `https://github.com/open-mmlab/mmdetection3d/blob/master/mmdet3d/models/dense_heads/centerpoint_head.py`"""  # noqa
+import numba
+import numpy as np
 import torch
-from mmdet3d.core import circle_nms, draw_heatmap_gaussian, gaussian_radius
+from mmdet3d.core import draw_heatmap_gaussian, gaussian_radius
 from mmdet3d.models import build_neck
-from mmdet3d.models.dense_heads.centerpoint_head import CenterHead
+from mmdet3d.models.dense_heads.centerpoint_head import CenterHead, circle_nms
 from mmdet3d.models.utils import clip_sigmoid
 from mmdet.core import reduce_mean
 from mmdet.models import build_backbone
@@ -26,6 +28,58 @@ bev_neck_conf = dict(type='SECONDFPN',
                      in_channels=[160, 320, 640],
                      upsample_strides=[2, 4, 8],
                      out_channels=[64, 64, 128])
+
+
+@numba.jit(nopython=True)
+def size_aware_circle_nms(dets, thresh_scale, post_max_size=83):
+    """Circular NMS.
+    An object is only counted as positive if no other center
+    with a higher confidence exists within a radius r using a
+    bird-eye view distance metric.
+    Args:
+        dets (torch.Tensor): Detection results with the shape of [N, 3].
+        thresh (float): Value of threshold.
+        post_max_size (int): Max number of prediction to be kept. Defaults
+            to 83
+    Returns:
+        torch.Tensor: Indexes of the detections to be kept.
+    """
+    x1 = dets[:, 0]
+    y1 = dets[:, 1]
+    dx1 = dets[:, 2]
+    dy1 = dets[:, 3]
+    yaws = dets[:, 4]
+    scores = dets[:, -1]
+    order = scores.argsort()[::-1].astype(np.int32)  # highest->lowest
+    ndets = dets.shape[0]
+    suppressed = np.zeros((ndets), dtype=np.int32)
+    keep = []
+    for _i in range(ndets):
+        i = order[_i]  # start with highest score box
+        if suppressed[
+                i] == 1:  # if any box have enough iou with this, remove it
+            continue
+        keep.append(i)
+        for _j in range(_i + 1, ndets):
+            j = order[_j]
+            if suppressed[j] == 1:
+                continue
+            # calculate center distance between i and j box
+            dist_x = abs(x1[i] - x1[j])
+            dist_y = abs(y1[i] - y1[j])
+            dist_x_th = (abs(dx1[i] * np.cos(yaws[i])) +
+                         abs(dx1[j] * np.cos(yaws[j])) +
+                         abs(dy1[i] * np.sin(yaws[i])) +
+                         abs(dy1[j] * np.sin(yaws[j])))
+            dist_y_th = (abs(dx1[i] * np.sin(yaws[i])) +
+                         abs(dx1[j] * np.sin(yaws[j])) +
+                         abs(dy1[i] * np.cos(yaws[i])) +
+                         abs(dy1[j] * np.cos(yaws[j])))
+            # ovr = inter / areas[j]
+            if dist_x <= dist_x_th * thresh_scale / 2 and \
+               dist_y <= dist_y_th * thresh_scale / 2:
+                suppressed[j] = 1
+    return keep[:post_max_size]
 
 
 class BEVDepthHead(CenterHead):
@@ -362,7 +416,9 @@ class BEVDepthHead(CenterHead):
                                           batch_vel,
                                           reg=batch_reg,
                                           task_id=task_id)
-            assert self.test_cfg['nms_type'] in ['circle', 'rotate']
+            assert self.test_cfg['nms_type'] in [
+                'size_aware_circle', 'circle', 'rotate'
+            ]
             batch_reg_preds = [box['bboxes'] for box in temp]
             batch_cls_preds = [box['scores'] for box in temp]
             batch_cls_labels = [box['labels'] for box in temp]
@@ -380,6 +436,30 @@ class BEVDepthHead(CenterHead):
                         post_max_size=self.test_cfg['post_max_size']),
                                         dtype=torch.long,
                                         device=boxes.device)
+
+                    boxes3d = boxes3d[keep]
+                    scores = scores[keep]
+                    labels = labels[keep]
+                    ret = dict(bboxes=boxes3d, scores=scores, labels=labels)
+                    ret_task.append(ret)
+                rets.append(ret_task)
+            elif self.test_cfg['nms_type'] == 'size_aware_circle':
+                ret_task = []
+                for i in range(batch_size):
+                    boxes3d = temp[i]['bboxes']
+                    scores = temp[i]['scores']
+                    labels = temp[i]['labels']
+                    boxes_2d = boxes3d[:, [0, 1, 3, 4, 6]]
+                    boxes = torch.cat([boxes_2d, scores.view(-1, 1)], dim=1)
+                    keep = torch.tensor(
+                        size_aware_circle_nms(
+                            boxes.detach().cpu().numpy(),
+                            self.test_cfg['thresh_scale'][task_id],
+                            post_max_size=self.test_cfg['post_max_size'],
+                        ),
+                        dtype=torch.long,
+                        device=boxes.device,
+                    )
 
                     boxes3d = boxes3d[keep]
                     scores = scores[keep]
